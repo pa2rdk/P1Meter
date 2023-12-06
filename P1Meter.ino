@@ -1,0 +1,639 @@
+// *************************************************************************************
+//  V0.1  
+//  By R.J. de Kok - (c) 2023
+// *************************************************************************************
+
+#include "EEPROM.h"
+#include "WiFi.h"
+#include <WifiMulti.h>
+//#include "Wire.h"
+#include <HTTPClient.h>
+#include <SPI.h>
+#include <ArduinoJson.h>
+
+#include "Free_Fonts.h" // Include the header file attached to this sketch
+#include <TFT_eSPI.h>   // https://github.com/Bodmer/TFT_eSPI
+#include "NTP_Time.h"
+
+#define LED           14
+#define BEEPER        32
+#define beepOn        1
+#define beepOff       0
+
+#define offsetEEPROM  0x10
+#define EEPROM_SIZE   250
+#define TIMEZONE euCET
+#define DEG2RAD       0.0174532925
+
+int majorVersion = 0;
+int minorVersion = 1;  //Eerste uitlevering 20/11/2023
+time_t local_time;
+time_t boot_time;
+int prevHour = -1;
+int prevMinute = -1;
+float prevMinutePower = 0;
+float usedPower = 0;
+float usedGas = 0;
+
+char receivedString[128];
+char chkGS[3] = "GS";
+
+struct StoreStruct {
+  byte chkDigit;
+  char ESP_SSID[25];
+  char ESP_PASS[27];
+  char energyIP[16];
+  byte beeperCnt;
+  uint32_t maxPower;
+  uint32_t dayPower;
+  int dayGas;
+  byte dispScreen;
+  int prefDay;
+  float lastPower;
+  float lastGas;  
+};
+
+typedef struct {  // WiFi Access
+  const char *SSID;
+  const char *PASSWORD;
+} wlanSSID;
+
+// #include "RDK_Settings.h";
+#include "All_Settings.h";
+
+WiFiMulti wifiMulti;
+TFT_eSPI tft = TFT_eSPI();  // Invoke custom library
+TFT_eSprite screen = TFT_eSprite(&tft);
+WiFiClient net;
+HTTPClient http;
+
+void setup() {
+  pinMode(BEEPER, OUTPUT);
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, 0);
+    
+  digitalWrite(BEEPER, beepOff);
+  if (storage.beeperCnt > 0) SingleBeep(2);
+
+  Serial.begin(115200);
+  Serial.printf("HomeBridge P1 Meter display v%d.%d\r\n",majorVersion, minorVersion);
+  Serial.println(F("beginning boot procedure...."));
+  Serial.println(F("Start tft"));
+  tft.begin();
+  tft.setRotation(screenRotation);
+  uint16_t calData[5] = { 304, 3493, 345, 3499, 4 };
+  tft.setTouch(calData);
+
+  tft.fillScreen(TFT_BLACK);
+
+  if (!EEPROM.begin(EEPROM_SIZE)) {
+    tft.fillScreen(TFT_BLACK);
+    tft.setCursor(0, 0);
+    tft.println(F("failed to initialise EEPROM"));
+    tft.println(F("failed to initialise EEPROM"));
+    while (1)
+      ;
+  }
+  if (EEPROM.read(offsetEEPROM) != storage.chkDigit) {
+    Serial.println(F("Writing defaults...."));
+    saveConfig();
+  }
+
+  loadConfig();
+  printConfig();
+
+  Serial.println(F("Type GS to enter setup:"));
+  tft.println(F("Wait for setup"));
+  delay(5000);
+  if (Serial.available()) {
+    Serial.println(F("Check for setup"));
+    if (Serial.find(chkGS)) {
+      tft.println(F("Setup entered"));
+      Serial.println(F("Setup entered..."));
+      setSettings(1);
+    }
+  }
+
+  delay(1000);
+  tft.fillScreen(TFT_BLACK);
+  tft.setCursor(0, 0);
+  tft.println(F("Starting"));
+
+  Serial.println(F("Start WiFi"));
+  tft.println(F("Start WiFi"));
+
+  int maxNetworks = (sizeof(wifiNetworks) / sizeof(wlanSSID));
+  for (int i = 0; i < maxNetworks; i++ )
+    wifiMulti.addAP(wifiNetworks[i].SSID, wifiNetworks[i].PASSWORD);
+  wifiMulti.addAP(storage.ESP_SSID,storage.ESP_PASS);
+
+  if (check_connection()){
+    getNTPData();
+    boot_time = local_time;
+  }
+  tft.fillScreen(TFT_BLACK);
+  screen.setColorDepth(8);
+}
+
+void loop() {
+  screen.createSprite(tft.width(), tft.height());
+  bool longDelay = false;
+  screen.fillSprite(TFT_BLACK);
+  String getData = "http://" + String(storage.energyIP) + "/api/v1/data";
+  Serial.println(getData);
+  http.begin(net, getData); //Specify request destination
+  int httpCode = http.GET(); //Send the request
+  Serial.printf("http Code = %d",httpCode);
+  if (httpCode > 0) { //Check the returning code
+    DynamicJsonDocument jsonDocument(2048);
+    deserializeJson(jsonDocument, http.getStream());
+    Serial.printf("wifi_ssid:%s\r\n", jsonDocument["wifi_ssid"].as<const char*>());
+    Serial.printf("wifi_strength:%d\r\n", jsonDocument["wifi_strength"].as<long>());
+
+    Serial.printf("total_power_import_kwh:%f\r\n", jsonDocument["total_power_import_kwh"].as<float>());
+    Serial.printf("total_power_export_kwh:%f\r\n", jsonDocument["total_power_export_kwh"].as<float>());
+    Serial.printf("active_power_w:%f\r\n", jsonDocument["active_power_w"].as<float>());
+    Serial.printf("active_power_l1_w:%f\r\n", jsonDocument["active_power_l1_w"].as<float>());
+    Serial.printf("active_power_l2_w:%f\r\n", jsonDocument["active_power_l2_w"].as<float>());
+    Serial.printf("active_power_l3_w:%f\r\n", jsonDocument["active_power_l3_w"].as<float>());            
+    Serial.printf("active_voltage_l1_v:%f\r\n", jsonDocument["active_voltage_l1_v"].as<float>());
+    Serial.printf("active_voltage_l2_v:%f\r\n", jsonDocument["active_voltage_l2_v"].as<float>());
+    Serial.printf("active_voltage_l3_v:%f\r\n", jsonDocument["active_voltage_l3_v"].as<float>());
+    Serial.printf("active_current_l1_a:%f\r\n", jsonDocument["active_current_l1_a"].as<float>());
+    Serial.printf("active_current_l2_a:%f\r\n", jsonDocument["active_current_l2_a"].as<float>());
+    Serial.printf("active_current_l3_a:%f\r\n", jsonDocument["active_current_l3_a"].as<float>());    
+    Serial.printf("Total GAS usage:%f\r\n", jsonDocument["total_gas_m3"].as<float>());
+
+    usedPower = jsonDocument["total_power_import_kwh"].as<float>() - jsonDocument["total_power_export_kwh"].as<float>();
+    usedGas = jsonDocument["total_gas_m3"].as<float>();
+    getNTPData();
+    int tDay = day(local_time);
+    int tHour = hour(local_time);
+    int tMinute = minute(local_time);
+
+
+    if (tDay != storage.prefDay){
+      storage.lastPower = usedPower;
+      storage.lastGas = usedGas;
+      storage.prefDay = tDay; 
+      saveConfig();
+    }
+    if (tMinute != prevMinute){
+      prevMinutePower = usedPower;
+      prevMinute = tMinute; 
+    }
+
+    int voltage = 0;
+    int height = 0;
+    int power1 = 0;
+    int power2 = 0;
+    int power3 = 0;    
+    uint32_t color = 0;
+    screen.setTextDatum(MC_DATUM);
+    screen.setTextColor(TFT_YELLOW, TFT_BLACK);
+    screen.drawString("EnergyMeter", 120, 13, 4);
+    screen.setTextColor(TFT_GREEN, TFT_BLACK);
+    screen.setCursor(76, 30);
+    screen.printf("%02d-%02d-%04d %02d:%02d", day(local_time), month(local_time), year(local_time), hour(local_time), minute(local_time));
+
+    voltage = round(jsonDocument["active_voltage_l1_v"].as<float>());
+    power1 = voltage * jsonDocument["active_current_l1_a"].as<float>();
+    screen.setTextColor(TFT_YELLOW);
+    screen.setCursor(0, 150);
+    screen.println("L1");
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(0, 160);
+    screen.printf("%dV", voltage);
+    screen.setCursor(0, 170);
+    screen.printf("%dW", power1);
+    screen.drawRect(0, 180, 30, 130, TFT_YELLOW);
+    screen.fillRect(1, 181, 28, 128, TFT_BLACK);
+    height = (voltage - 220)*3;
+    color = TFT_GREEN;
+    if (voltage>235) color = TFT_YELLOW;
+    if (voltage>250) color = TFT_RED;
+    screen.fillRect(2, 308-height, 12, height, color);
+    height = power1/30;
+    if (height>123) height = 123;
+    color = TFT_BLUE;
+    if (power1>1800) color = TFT_RED;
+    if (power1>0){
+      screen.fillRect(16, 308-height, 12, height, color);
+      if (power1>3680) screen.fillTriangle(22, 185, 26, 113, 38, 113, TFT_WHITE);
+    } else {
+      screen.fillRect(16, 182, 12, height*-1, TFT_GREEN);
+    }
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(5, 300);
+    screen.println("V");
+    screen.setCursor(19, 300);
+    screen.println("W");    
+
+    voltage = round(jsonDocument["active_voltage_l2_v"].as<float>());
+    power2 = voltage * jsonDocument["active_current_l2_a"].as<float>();
+    screen.setTextColor(TFT_GREEN);
+    screen.setCursor(35, 150);
+    screen.println("L2");
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(35, 160);
+    screen.printf("%dV", voltage);
+    screen.setCursor(35, 170);
+    screen.printf("%dW", power2);
+    screen.drawRect(35, 180, 30, 130, TFT_GREEN);
+    screen.fillRect(36, 181, 28, 128, TFT_BLACK);
+    height = (voltage - 220)*3;
+    color = TFT_GREEN;
+    if (voltage>235) color = TFT_YELLOW;
+    if (voltage>250) color = TFT_RED;
+    screen.fillRect(37, 308-height, 12, height, color);
+    height = power2/30;
+    if (height>123) height = 123;
+    color = TFT_BLUE;
+    if (power2>1800) color = TFT_RED;
+    if (power2>0) {
+      screen.fillRect(51, 308-height, 12, height, color);
+      if (power2>3680) screen.fillTriangle(56, 185, 61, 113, 73, 113, TFT_WHITE);
+    } else {
+      screen.fillRect(51, 182, 12, height*-1, TFT_GREEN);
+    } 
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(40, 300);
+    screen.println("V");
+    screen.setCursor(54, 300);
+    screen.println("W"); 
+
+    voltage = round(jsonDocument["active_voltage_l3_v"].as<float>());
+    power3 = voltage * jsonDocument["active_current_l3_a"].as<float>();
+    screen.setTextColor(TFT_BLUE);
+    screen.setCursor(70, 150);
+    screen.println("L3");
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(70, 160);
+    screen.printf("%dV", voltage);
+    screen.setCursor(70, 170);
+    screen.printf("%dW", power3);
+    screen.drawRect(70, 180, 30, 130, TFT_BLUE);
+    screen.fillRect(71, 181, 28, 128, TFT_BLACK);
+    height = (voltage - 220)*3;
+    color = TFT_GREEN;
+    if (voltage>235) color = TFT_YELLOW;
+    if (voltage>250) color = TFT_RED;
+    screen.fillRect(72, 308-height, 12, height, color);
+    height = power3/30;
+    if (height>123) height = 123;
+    color = TFT_BLUE;
+    if (power3>1800) color = TFT_RED;
+    if (power3>0){
+      screen.fillRect(86, 308-height, 12, height, color);
+      if (power3>3680) screen.fillTriangle(92, 185, 96, 113, 108, 113, TFT_WHITE);
+    } else {
+      screen.fillRect(86, 182, 12, height*-1, TFT_GREEN);
+    }
+    screen.setTextColor(TFT_WHITE);
+    screen.setCursor(75, 300);
+    screen.println("V");
+    screen.setCursor(89, 300);
+    screen.println("W"); 
+
+    int part1 = (abs(power1)*360)/storage.maxPower;
+    int part2 = (abs(power2)*360)/storage.maxPower;
+    int part3 = (abs(power3)*360)/storage.maxPower; 
+    int nPart1 = 0;
+    int nPart2 = 0;
+    int nPart3 = 0;        
+    if (power1<0) {
+      nPart1 = part1;
+      part1 = 0;
+    }
+    if (power2<0)
+    {
+      nPart2 = part2;
+      part2 = 0;
+    }
+    if (power3<0){
+      nPart3 = part3;
+      part3 = 0;
+    }
+    int part4 = 360 - (part1 + part2 + part3);  
+    int nPart4 = 360 - (nPart1 + nPart2 + nPart3); 
+    Serial.printf("Power1:%d, Power2:%d, Power3:%d\r\n",power1,power2,power3); 
+    Serial.printf("Part1:%d, Part2:%d, Part3:%d, Rest:%d\r\n",part1,part2,part3, part4);
+    screen.drawCircle(170, 246, 66, TFT_WHITE);
+
+    int totalPart = part1 + part2 + part3;
+    int totalnPart = nPart1 + nPart2 + nPart3;
+
+    fillSegment(170, 246, 0, part1, 64, TFT_YELLOW);
+    fillSegment(170, 246, part1, part2, 64, TFT_GREEN);
+    fillSegment(170, 246, part1 + part2, part3, 64, TFT_BLUE);
+    fillSegment(170, 246, part1 + part2 + part3, part4, 64, TFT_BLACK);
+    fillSegment(170, 246, 360 - totalnPart, totalnPart, 64, TFT_GREEN);
+    fillSegment(170, 246, 0, 360, 58, TFT_BLACK);
+
+    float totalPower = (usedPower - storage.lastPower);
+    totalPower = round(totalPower * 100)/100;
+    Serial.printf("Used Power today:(%f-%f) = %f KW\r\n", usedPower, storage.lastPower, totalPower);
+    fillSegment(170, 246, 0, (totalPower)*(360/storage.dayPower), 56, TFT_ORANGE);
+    if (totalPower>storage.dayPower){
+      float restPower = totalPower;
+      while (restPower>storage.dayPower) restPower -= storage.dayPower; 
+      fillSegment(170, 246, 0, (restPower)*(360/storage.dayPower), 56, TFT_RED);
+    }
+
+    fillSegment(170, 246, 0, 360, 50, TFT_BLACK);
+
+    float totalGas = round((usedGas - storage.lastGas)*100)/100;
+    Serial.printf("Used GAS today:%f\r\n", totalGas);
+    fillSegment(170, 246, 0, (totalGas)*(360/storage.dayGas), 48, TFT_GREEN);
+    if (totalGas>storage.dayGas){
+      float restGas = totalGas;
+      while (restGas>storage.dayGas) restGas -= storage.dayGas; 
+      fillSegment(170, 246, 0, (restGas)*(360/storage.dayGas), 48, TFT_RED);
+    }
+
+    fillSegment(170, 246, 0, 360, 42, TFT_BLACK);
+
+    screen.setTextDatum(MC_DATUM);
+    screen.setTextPadding(screen.textWidth(String(power1+power2+power3) + "W"));
+    if (totalPart>0)
+      screen.setTextColor(TFT_RED, TFT_BLACK);
+    else   
+      screen.setTextColor(TFT_GREEN, TFT_BLACK);
+    screen.drawString(String(power1+power2+power3)+"W", 170, 225, 2);
+
+    screen.setTextPadding(screen.textWidth(String(totalPower) + "KW"));
+    screen.setTextColor(TFT_ORANGE, TFT_BLACK);
+    screen.drawString(String(totalPower) + "KW", 170, 240, 2);
+
+    screen.setTextPadding(screen.textWidth(String(totalGas) + "M3"));
+    screen.setTextColor(TFT_GREEN, TFT_BLACK);
+    screen.drawString(String(totalGas) + "M3", 170, 255, 2);
+  } else {
+    screen.fillSprite(TFT_BLACK);
+    screen.setCursor(0, 0);
+    screen.println(F("Unable to retrieve data"));
+    longDelay = true;
+  }
+  screen.pushSprite(0, 0);
+  screen.deleteSprite();
+  delay(2000);
+  if (longDelay) delay(120000);
+}
+
+// void getImage(){
+//   readRectRGB(0,0,320,240);
+// }
+
+int fillSegment(int x, int y, int start_angle, int sub_angle, int r, unsigned int color)
+{
+  // Calculate first pair of coordinates for segment start
+  float sx = cos((start_angle - 90) * DEG2RAD);
+  float sy = sin((start_angle - 90) * DEG2RAD);
+  uint16_t x1 = sx * r + x;
+  uint16_t y1 = sy * r + y;
+
+  // Draw color blocks every inc degrees
+  for (int i = start_angle; i < start_angle + sub_angle; i++) {
+
+    // Calculate pair of coordinates for segment end
+    int x2 = cos((i + 1 - 90) * DEG2RAD) * r + x;
+    int y2 = sin((i + 1 - 90) * DEG2RAD) * r + y;
+
+    screen.fillTriangle(x1, y1, x2, y2, x, y, color);
+
+    // Copy segment end to sgement start for next segment
+    x1 = x2;
+    y1 = y2;
+  }
+}
+
+boolean check_connection() {
+  if (WiFi.status() != WL_CONNECTED) {
+    InitWiFiConnection();
+  }
+  return (WiFi.status() == WL_CONNECTED);
+}
+
+void InitWiFiConnection() {
+  long startTime = millis();
+  while (wifiMulti.run() != WL_CONNECTED && millis()-startTime<30000){
+    delay(1000);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED){
+    Serial.print("Connected to: ");
+    Serial.println(WiFi.SSID());
+    Serial.print("Local IP: ");
+    Serial.println(WiFi.localIP());
+  }
+}
+
+void getNTPData() {
+  if (check_connection()) {
+    syncTime();
+    local_time = TIMEZONE.toLocal(now(), &tz1_Code);   
+  }
+}
+
+void SingleBeep(int cnt) {
+  int tl = 200;
+  for (int i = 0; i < cnt; i++) {
+    digitalWrite(BEEPER, beepOn);
+    delay(tl);
+    digitalWrite(BEEPER, beepOff);
+    delay(tl);
+  }
+}
+
+bool saveConfig() {
+  bool commitEeprom = false;
+  for (unsigned int t = 0; t < sizeof(storage); t++) {
+    if (*((char *)&storage + t) != EEPROM.read(offsetEEPROM + t)) {
+      EEPROM.write(offsetEEPROM + t, *((char *)&storage + t));
+      commitEeprom = true;
+    }
+  }
+  if (commitEeprom) EEPROM.commit();
+  return true;
+}
+
+void loadConfig() {
+  if (EEPROM.read(offsetEEPROM + 0) == storage.chkDigit)
+    for (unsigned int t = 0; t < sizeof(storage); t++)
+      *((char *)&storage + t) = EEPROM.read(offsetEEPROM + t);
+}
+
+void printConfig() {
+  if (EEPROM.read(offsetEEPROM + 0) == storage.chkDigit) {
+    for (unsigned int t = 0; t < sizeof(storage); t++)
+      Serial.write(EEPROM.read(offsetEEPROM + t));
+    Serial.println();
+    setSettings(0);
+  }
+}
+
+void setSettings(bool doAsk) {
+  int i = 0;
+  Serial.print(F("SSID ("));
+  Serial.print(storage.ESP_SSID);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    getStringValue(15);
+    if (receivedString[0] != 0) {
+      storage.ESP_SSID[0] = 0;
+      strcat(storage.ESP_SSID, receivedString);
+    }
+  }
+  Serial.println();
+
+  Serial.print(F("Password ("));
+  Serial.print(storage.ESP_PASS);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    getStringValue(26);
+    if (receivedString[0] != 0) {
+      storage.ESP_PASS[0] = 0;
+      strcat(storage.ESP_PASS, receivedString);
+    }
+  }
+  Serial.println();
+
+  Serial.print(F("Energy IP ("));
+  Serial.print(storage.energyIP);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    getStringValue(26);
+    if (receivedString[0] != 0) {
+      storage.energyIP[0] = 0;
+      strcat(storage.energyIP, receivedString);
+    }
+  }
+  Serial.println();
+
+  Serial.print(F("#Beeper ("));
+  Serial.print(storage.beeperCnt);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.beeperCnt = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Max. current power ("));
+  Serial.print(storage.maxPower);
+  Serial.print(F(" W):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.maxPower = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Max. daily power ("));
+  Serial.print(storage.dayPower);
+  Serial.print(F(" KW):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.dayPower = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Max. daily gas ("));
+  Serial.print(storage.dayGas);
+  Serial.print(F(" M3):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.dayGas = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Screen 1 (0 - 5) ("));
+  Serial.print(storage.dispScreen);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.dispScreen = i;
+  }
+  Serial.println();
+  Serial.println();
+
+  if (doAsk == 1) {
+    saveConfig();
+    loadConfig();
+  }
+}
+
+void getStringValue(int length) {
+  serialFlush();
+  receivedString[0] = 0;
+  int i = 0;
+  while (receivedString[i] != 13 && i < length) {
+    if (Serial.available() > 0) {
+      receivedString[i] = Serial.read();
+      if (receivedString[i] == 13 || receivedString[i] == 10) {
+        i--;
+      } else {
+        Serial.write(receivedString[i]);
+      }
+      i++;
+    }
+  }
+  receivedString[i] = 0;
+  serialFlush();
+}
+
+byte getCharValue() {
+  serialFlush();
+  receivedString[0] = 0;
+  int i = 0;
+  while (receivedString[i] != 13 && i < 2) {
+    if (Serial.available() > 0) {
+      receivedString[i] = Serial.read();
+      if (receivedString[i] == 13 || receivedString[i] == 10) {
+        i--;
+      } else {
+        Serial.write(receivedString[i]);
+      }
+      i++;
+    }
+  }
+  receivedString[i] = 0;
+  serialFlush();
+  return receivedString[i - 1];
+}
+
+int getNumericValue() {
+  serialFlush();
+  int myInt = 0;
+  byte inChar = 0;
+  bool isNegative = false;
+  receivedString[0] = 0;
+
+  int i = 0;
+  while (inChar != 13) {
+    if (Serial.available() > 0) {
+      inChar = Serial.read();
+      if (inChar > 47 && inChar < 58) {
+        receivedString[i] = inChar;
+        i++;
+        Serial.write(inChar);
+        myInt = (myInt * 10) + (inChar - 48);
+      }
+      if (inChar == 45) {
+        Serial.write(inChar);
+        isNegative = true;
+      }
+    }
+  }
+  receivedString[i] = 0;
+  if (isNegative == true) myInt = myInt * -1;
+  serialFlush();
+  return myInt;
+}
+
+void serialFlush() {
+  for (int i = 0; i < 10; i++) {
+    while (Serial.available() > 0) {
+      Serial.read();
+    }
+  }
+}
