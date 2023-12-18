@@ -24,16 +24,27 @@
 #define EEPROM_SIZE   250
 #define TIMEZONE euCET
 #define DEG2RAD       0.0174532925
+#define ExampleCounter  60
+#define ExampleScale    10
+#define ExampleMax      18
+#define MinutesCounter  60
+#define MinutesScale    10
+#define HoursCounter  24
+#define HoursScale    6
 
+float examples[ExampleCounter];
+float minutes[MinutesCounter];
+float hours[HoursCounter];
 int majorVersion = 0;
 int minorVersion = 1;  //Eerste uitlevering 20/11/2023
 time_t local_time;
 time_t boot_time;
 int prevHour = -1;
 int prevMinute = -1;
-float prevMinutePower = 0;
 float usedPower = 0;
 float usedGas = 0;
+float usedWater = 0;
+bool showDayGraph = 0;
 
 char receivedString[128];
 char chkGS[3] = "GS";
@@ -43,14 +54,18 @@ struct StoreStruct {
   char ESP_SSID[25];
   char ESP_PASS[27];
   char energyIP[16];
+  char waterIP[16];  
   byte beeperCnt;
   uint32_t maxPower;
   uint32_t dayPower;
-  int dayGas;
+  uint32_t dayGas;
+  uint32_t dayWater;
+  bool useYesterdayAsMax;
   byte dispScreen;
   int prefDay;
   float lastPower;
   float lastGas;  
+  float lastWater; 
 };
 
 typedef struct {  // WiFi Access
@@ -136,16 +151,44 @@ void setup() {
 }
 
 void loop() {
+  uint16_t touchX = 0, touchY = 0;
+  bool pressed = tft.getTouch(&touchX, &touchY);
+  bool doMenu=false;
+  if (pressed){
+    Serial.printf("Position x:%d, y:%d\r\n",touchX, touchY);
+    if (touchX>200 && touchY<30) esp_restart();
+    showDayGraph = !showDayGraph;
+  } 
   screen.createSprite(tft.width(), tft.height());
   bool longDelay = false;
   screen.fillSprite(TFT_BLACK);
-  String getData = "http://" + String(storage.energyIP) + "/api/v1/data";
+
+  bool getWater = true;
+  usedWater = 0;
+  int httpCode;
+  String getData;
+  DynamicJsonDocument jsonDocument(2048);
+  for (int i = 0;i<8;i++) if (storage.waterIP[i]!=storage.energyIP[i]) getWater = false;
+  if (getWater){
+    getData = "http://" + String(storage.waterIP) + "/api/v1/data";
+    Serial.println(getData);
+    http.begin(net, getData); //Specify request destination
+    httpCode = http.GET(); //Send the request
+    Serial.printf("http Code = %d",httpCode);
+    if (httpCode > 0) { //Check the returning code
+      deserializeJson(jsonDocument, http.getStream());
+      Serial.printf("total_liter_m3:%f\r\n", jsonDocument["total_liter_m3"].as<float>());
+      usedWater = jsonDocument["total_liter_m3"].as<float>();
+    } 
+    http.end();
+  }
+
+  getData = "http://" + String(storage.energyIP) + "/api/v1/data";
   Serial.println(getData);
   http.begin(net, getData); //Specify request destination
-  int httpCode = http.GET(); //Send the request
+  httpCode = http.GET(); //Send the request
   Serial.printf("http Code = %d",httpCode);
   if (httpCode > 0) { //Check the returning code
-    DynamicJsonDocument jsonDocument(2048);
     deserializeJson(jsonDocument, http.getStream());
     Serial.printf("wifi_ssid:%s\r\n", jsonDocument["wifi_ssid"].as<const char*>());
     Serial.printf("wifi_strength:%d\r\n", jsonDocument["wifi_strength"].as<long>());
@@ -171,16 +214,30 @@ void loop() {
     int tHour = hour(local_time);
     int tMinute = minute(local_time);
 
+    float totalPower = (usedPower - storage.lastPower);
+    totalPower = round(totalPower * 100)/100;
+    float totalGas = round((usedGas - storage.lastGas)*100)/100;
+    float totalWater = round((usedWater - storage.lastWater)*1000);
 
     if (tDay != storage.prefDay){
       storage.lastPower = usedPower;
       storage.lastGas = usedGas;
+      storage.lastWater = usedWater;
       storage.prefDay = tDay; 
+      if (storage.useYesterdayAsMax && storage.prefDay!=-1){
+        storage.dayPower = storage.lastPower;
+        storage.dayGas = storage.lastGas;
+        storage.dayWater = storage.lastWater;
+      }
       saveConfig();
     }
     if (tMinute != prevMinute){
-      prevMinutePower = usedPower;
       prevMinute = tMinute; 
+      moveMinutes(jsonDocument["active_power_w"].as<float>());
+    }
+    if (tHour != prevHour){
+      prevHour = tHour; 
+      moveHours(jsonDocument["active_power_w"].as<float>());
     }
 
     int voltage = 0;
@@ -199,100 +256,100 @@ void loop() {
     voltage = round(jsonDocument["active_voltage_l1_v"].as<float>());
     power1 = voltage * jsonDocument["active_current_l1_a"].as<float>();
     screen.setTextColor(TFT_YELLOW);
-    screen.setCursor(0, 150);
+    screen.setCursor(0, 160);
     screen.println("L1");
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(0, 160);
-    screen.printf("%dV", voltage);
     screen.setCursor(0, 170);
+    screen.printf("%dV", voltage);
+    screen.setCursor(0, 180);
     screen.printf("%dW", power1);
-    screen.drawRect(0, 180, 30, 130, TFT_YELLOW);
-    screen.fillRect(1, 181, 28, 128, TFT_BLACK);
+    screen.drawRect(0, 190, 30, 130, TFT_YELLOW);
+    screen.fillRect(1, 191, 28, 128, TFT_BLACK);
     height = (voltage - 220)*3;
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(2, 308-height, 12, height, color);
+    screen.fillRect(2, 318-height, 12, height, color);
     height = power1/30;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power1>1800) color = TFT_RED;
     if (power1>0){
-      screen.fillRect(16, 308-height, 12, height, color);
-      if (power1>3680) screen.fillTriangle(22, 185, 26, 113, 38, 113, TFT_WHITE);
+      screen.fillRect(16, 318-height, 12, height, color);
+      if (power1>3680) screen.fillTriangle(17, 195, 22, 191, 27, 195, TFT_WHITE);
     } else {
-      screen.fillRect(16, 182, 12, height*-1, TFT_GREEN);
+      screen.fillRect(16, 192, 12, height*-1, TFT_GREEN);
     }
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(5, 300);
+    screen.setCursor(5, 310);
     screen.println("V");
-    screen.setCursor(19, 300);
+    screen.setCursor(19, 310);
     screen.println("W");    
 
     voltage = round(jsonDocument["active_voltage_l2_v"].as<float>());
     power2 = voltage * jsonDocument["active_current_l2_a"].as<float>();
     screen.setTextColor(TFT_GREEN);
-    screen.setCursor(35, 150);
+    screen.setCursor(35, 160);
     screen.println("L2");
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(35, 160);
-    screen.printf("%dV", voltage);
     screen.setCursor(35, 170);
+    screen.printf("%dV", voltage);
+    screen.setCursor(35, 180);
     screen.printf("%dW", power2);
-    screen.drawRect(35, 180, 30, 130, TFT_GREEN);
-    screen.fillRect(36, 181, 28, 128, TFT_BLACK);
+    screen.drawRect(35, 190, 30, 130, TFT_GREEN);
+    screen.fillRect(36, 191, 28, 128, TFT_BLACK);
     height = (voltage - 220)*3;
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(37, 308-height, 12, height, color);
+    screen.fillRect(37, 318-height, 12, height, color);
     height = power2/30;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power2>1800) color = TFT_RED;
     if (power2>0) {
-      screen.fillRect(51, 308-height, 12, height, color);
-      if (power2>3680) screen.fillTriangle(56, 185, 61, 113, 73, 113, TFT_WHITE);
+      screen.fillRect(51, 318-height, 12, height, color);
+      if (power2>3680) screen.fillTriangle(52, 195, 57, 191, 62, 195, TFT_WHITE);
     } else {
-      screen.fillRect(51, 182, 12, height*-1, TFT_GREEN);
+      screen.fillRect(51, 192, 12, height*-1, TFT_GREEN);
     } 
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(40, 300);
+    screen.setCursor(40, 310);
     screen.println("V");
-    screen.setCursor(54, 300);
+    screen.setCursor(54, 310);
     screen.println("W"); 
 
     voltage = round(jsonDocument["active_voltage_l3_v"].as<float>());
     power3 = voltage * jsonDocument["active_current_l3_a"].as<float>();
     screen.setTextColor(TFT_BLUE);
-    screen.setCursor(70, 150);
+    screen.setCursor(70, 160);
     screen.println("L3");
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(70, 160);
-    screen.printf("%dV", voltage);
     screen.setCursor(70, 170);
+    screen.printf("%dV", voltage);
+    screen.setCursor(70, 180);
     screen.printf("%dW", power3);
-    screen.drawRect(70, 180, 30, 130, TFT_BLUE);
-    screen.fillRect(71, 181, 28, 128, TFT_BLACK);
+    screen.drawRect(70, 190, 30, 130, TFT_BLUE);
+    screen.fillRect(71, 191, 28, 128, TFT_BLACK);
     height = (voltage - 220)*3;
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(72, 308-height, 12, height, color);
+    screen.fillRect(72, 318-height, 12, height, color);
     height = power3/30;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power3>1800) color = TFT_RED;
     if (power3>0){
-      screen.fillRect(86, 308-height, 12, height, color);
-      if (power3>3680) screen.fillTriangle(92, 185, 96, 113, 108, 113, TFT_WHITE);
+      screen.fillRect(86, 318-height, 12, height, color);
+      if (power3>3680) screen.fillTriangle(87, 195, 92, 191, 97, 195, TFT_WHITE);
     } else {
-      screen.fillRect(86, 182, 12, height*-1, TFT_GREEN);
+      screen.fillRect(86, 192, 12, height*-1, TFT_GREEN);
     }
     screen.setTextColor(TFT_WHITE);
-    screen.setCursor(75, 300);
+    screen.setCursor(75, 310);
     screen.println("V");
-    screen.setCursor(89, 300);
+    screen.setCursor(89, 310);
     screen.println("W"); 
 
     int part1 = (abs(power1)*360)/storage.maxPower;
@@ -318,40 +375,47 @@ void loop() {
     int nPart4 = 360 - (nPart1 + nPart2 + nPart3); 
     Serial.printf("Power1:%d, Power2:%d, Power3:%d\r\n",power1,power2,power3); 
     Serial.printf("Part1:%d, Part2:%d, Part3:%d, Rest:%d\r\n",part1,part2,part3, part4);
-    screen.drawCircle(170, 246, 66, TFT_WHITE);
+    screen.drawCircle(170, 252, 66, TFT_WHITE);
 
     int totalPart = part1 + part2 + part3;
     int totalnPart = nPart1 + nPart2 + nPart3;
 
-    fillSegment(170, 246, 0, part1, 64, TFT_YELLOW);
-    fillSegment(170, 246, part1, part2, 64, TFT_GREEN);
-    fillSegment(170, 246, part1 + part2, part3, 64, TFT_BLUE);
-    fillSegment(170, 246, part1 + part2 + part3, part4, 64, TFT_BLACK);
-    fillSegment(170, 246, 360 - totalnPart, totalnPart, 64, TFT_GREEN);
-    fillSegment(170, 246, 0, 360, 58, TFT_BLACK);
+    fillSegment(170, 252, 0, part1, 64, TFT_YELLOW);
+    fillSegment(170, 252, part1, part2, 64, TFT_GREEN);
+    fillSegment(170, 252, part1 + part2, part3, 64, TFT_BLUE);
+    fillSegment(170, 252, part1 + part2 + part3, part4, 64, TFT_BLACK);
+    fillSegment(170, 252, 360 - totalnPart, totalnPart, 64, TFT_GREEN);
+    fillSegment(170, 252, 0, 360, 58, TFT_BLACK);
 
-    float totalPower = (usedPower - storage.lastPower);
-    totalPower = round(totalPower * 100)/100;
     Serial.printf("Used Power today:(%f-%f) = %f KW\r\n", usedPower, storage.lastPower, totalPower);
-    fillSegment(170, 246, 0, (totalPower)*(360/storage.dayPower), 56, TFT_ORANGE);
+    fillSegment(170, 252, 0, (totalPower)*(360/storage.dayPower), 56, TFT_MAGENTA);
     if (totalPower>storage.dayPower){
       float restPower = totalPower;
       while (restPower>storage.dayPower) restPower -= storage.dayPower; 
-      fillSegment(170, 246, 0, (restPower)*(360/storage.dayPower), 56, TFT_RED);
+      fillSegment(170, 252, 0, (restPower)*(360/storage.dayPower), 54, TFT_RED);
     }
 
-    fillSegment(170, 246, 0, 360, 50, TFT_BLACK);
+    fillSegment(170, 252, 0, 360, 50, TFT_BLACK);
 
-    float totalGas = round((usedGas - storage.lastGas)*100)/100;
     Serial.printf("Used GAS today:%f\r\n", totalGas);
-    fillSegment(170, 246, 0, (totalGas)*(360/storage.dayGas), 48, TFT_GREEN);
+    fillSegment(170, 252, 0, (totalGas)*(360/storage.dayGas), 48, TFT_SKYBLUE);
     if (totalGas>storage.dayGas){
       float restGas = totalGas;
       while (restGas>storage.dayGas) restGas -= storage.dayGas; 
-      fillSegment(170, 246, 0, (restGas)*(360/storage.dayGas), 48, TFT_RED);
+      fillSegment(170, 252, 0, (restGas)*(360/storage.dayGas), 46, TFT_RED);
     }
 
-    fillSegment(170, 246, 0, 360, 42, TFT_BLACK);
+    fillSegment(170, 252, 0, 360, 42, TFT_BLACK);
+
+    Serial.printf("Used water today:%f\r\n", totalWater);
+    fillSegment(170, 252, 0, (totalWater)*(360/storage.dayWater), 40, TFT_GREENYELLOW);
+    if (totalWater>storage.dayWater){
+      float restWater = totalWater;
+      while (restWater>storage.dayWater) restWater -= storage.dayWater; 
+      fillSegment(170, 252, 0, (restWater)*(360/storage.dayWater), 38, TFT_RED);
+    }
+
+    fillSegment(170, 252, 0, 360, 34, TFT_BLACK);
 
     screen.setTextDatum(MC_DATUM);
     screen.setTextPadding(screen.textWidth(String(power1+power2+power3) + "W"));
@@ -359,30 +423,144 @@ void loop() {
       screen.setTextColor(TFT_RED, TFT_BLACK);
     else   
       screen.setTextColor(TFT_GREEN, TFT_BLACK);
-    screen.drawString(String(power1+power2+power3)+"W", 170, 225, 2);
+    screen.drawString(String(power1+power2+power3)+"W", 170, 231, 2);
 
     screen.setTextPadding(screen.textWidth(String(totalPower) + "KW"));
-    screen.setTextColor(TFT_ORANGE, TFT_BLACK);
-    screen.drawString(String(totalPower) + "KW", 170, 240, 2);
+    screen.setTextColor(TFT_MAGENTA, TFT_BLACK);
+    screen.drawString(String(totalPower) + "KW", 170, 245, 2);
 
     screen.setTextPadding(screen.textWidth(String(totalGas) + "M3"));
-    screen.setTextColor(TFT_GREEN, TFT_BLACK);
-    screen.drawString(String(totalGas) + "M3", 170, 255, 2);
+    screen.setTextColor(TFT_SKYBLUE, TFT_BLACK);
+    screen.drawString(String(totalGas) + "M3", 170, 259, 2);
+
+    screen.setTextPadding(screen.textWidth(String(totalWater,0) + "L"));
+    screen.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+    screen.drawString(String(totalWater) + "L", 170, 273, 2);
   } else {
     screen.fillSprite(TFT_BLACK);
     screen.setCursor(0, 0);
     screen.println(F("Unable to retrieve data"));
     longDelay = true;
   }
+
+  // moveExamples();
+  // printGraph(examples, ExampleCounter, ExampleScale, TFT_BLUE, "Examples");
+  if (showDayGraph){
+    printGraph(minutes, MinutesCounter, MinutesScale, TFT_BLUE, "Energy (M)");
+  } else {
+    printGraph(hours, HoursCounter, HoursScale, TFT_BLUE, "Energy (H)");
+  }
   screen.pushSprite(0, 0);
   screen.deleteSprite();
   delay(2000);
-  if (longDelay) delay(120000);
+  if (longDelay) delay(15000);
 }
 
-// void getImage(){
-//   readRectRGB(0,0,320,240);
-// }
+void moveExamples() {
+  for (int i = 0; i < ExampleCounter -1 ; i++) {
+    examples[(ExampleCounter-1) - i] = examples[(ExampleCounter-2) - i];
+  }
+  examples[0] = random(0, ExampleMax);
+  examples[0] -= (ExampleMax/2);
+}
+
+void moveMinutes(float actualPower) {
+  for (int i = 0; i < 59; i++) {
+    minutes[59 - i] = minutes[58 - i];
+  }
+  Serial.printf("Total minute power is %d\r\n",actualPower);
+  for (int i = 0; i < MinutesCounter -1 ; i++) {
+    Serial.printf("%d = %d\r\n",i,minutes[i]);
+  }
+  minutes[0] = actualPower;
+}
+
+void moveHours(float actualPower) {
+  for (int i = 0; i < 24; i++) {
+    hours[24 - i] = hours[23 - i];
+  }
+  Serial.printf("Total hour power is %d\r\n",actualPower);
+  for (int i = 0; i < HoursCounter -1 ; i++) {
+    Serial.printf("%d = %d\r\n",i,hours[i]);
+  }
+  hours[0] = actualPower;
+}
+
+void printGraph(float graphArray[], int lenArray, int scale, uint32_t lColor, String gHeader){
+  screen.fillRect(0,40,240,110,TFT_WHITE);
+  screen.drawLine(25,50,25,130,lColor);
+  screen.drawLine(25,130,215,130,lColor);
+  screen.setTextSize(2);
+  screen.setTextDatum(MC_DATUM);
+  screen.setTextColor(lColor);
+  screen.drawString(gHeader, 120, 60, GFXFF);
+
+  screen.setTextSize(1);
+  int hStart = 20;
+  for (int i = 0;i<scale+1; i++){
+    int xPos = 20 + (float)190/scale*i;
+    int xTxt = lenArray - ((lenArray/scale)*i);
+    screen.drawString(String(xTxt), xPos, 140, GFXFF);
+  }
+
+  float vMax = 1;
+  float vMin = 0;
+  for (int i = 0;i<lenArray; i++){
+    if (graphArray[i]>vMax) vMax = graphArray[i];
+    if (graphArray[i]<vMin) vMin = graphArray[i];
+  }
+
+  if (vMin==0){
+    for (int i = 0;i<5; i++){
+      int yPos = 50 + (i*20);
+      float yTxt = vMin + ((((float)(vMax-vMin)/4)*(4-i)));
+      char buff[5];
+      if (yTxt <10 and yTxt > -10) sprintf(buff,"%.1f",yTxt);
+      if (yTxt >9 or yTxt < -9) sprintf(buff,"%.0f",yTxt);
+      screen.drawString(buff, 12, yPos, GFXFF);
+    }
+    float hScale = (float)190/(lenArray-1);
+    float vScale = (float)80/vMax;
+
+    int lastX, lastY;
+    for (int i=0;i<lenArray;i++){
+      int x = 215-(i*hScale);
+      int y = 130-(graphArray[i]*vScale);
+      //Serial.printf("Pixel %d with value  %d on %d,%d (max = %d)\r\n",i, graphArray[i], x, y, vMax);
+      if (i==0) screen.drawPixel(x,y,TFT_RED);
+      else screen.drawLine(lastX,lastY,x,y,TFT_RED);
+      lastX = x;
+      lastY = y;
+    }
+  } else {
+    char buff[5];
+    sprintf(buff,"%.0f",vMax);
+    screen.drawString(buff, 12, 50, GFXFF);
+    screen.drawString("0", 12, 90, GFXFF);
+    sprintf(buff,"%.0f",vMin);
+    screen.drawString(buff, 12, 130, GFXFF);
+    
+    float hScale = (float)190/(lenArray-1);
+    float vScaleP = (float)40/vMax;
+    float vScaleN = (float)40/(vMin*-1);
+
+    float lastX, lastY;
+    //for (int i=0;i<lenArray;i++){
+    for (int i=lenArray-1;i>=0;i--){
+      float x = 215-(i*hScale);
+      float y = 90;
+      if (graphArray[i]>=0) y = 90-(graphArray[i]*vScaleP);
+      if (graphArray[i]<0) y = 90-(graphArray[i]*vScaleN);
+      Serial.printf("Pixel %d with value  %f on %f,%f (max = %f)\r\n",i, graphArray[i], x, y, vMax);
+      uint32_t color = (y>90 && (lastY>90 || y>lastY))?TFT_GREEN:TFT_RED;
+      if (i==lenArray-1) screen.drawPixel(x,y,TFT_RED);
+      else screen.drawLine(lastX,lastY,x,y,color);
+      lastX = x;
+      lastY = y;
+    }
+  }
+
+}
 
 int fillSegment(int x, int y, int start_angle, int sub_angle, int r, unsigned int color)
 {
@@ -510,6 +688,18 @@ void setSettings(bool doAsk) {
   }
   Serial.println();
 
+  Serial.print(F("Water IP ("));
+  Serial.print(storage.waterIP);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    getStringValue(26);
+    if (receivedString[0] != 0) {
+      storage.waterIP[0] = 0;
+      strcat(storage.waterIP, receivedString);
+    }
+  }
+  Serial.println();
+
   Serial.print(F("#Beeper ("));
   Serial.print(storage.beeperCnt);
   Serial.print(F("):"));
@@ -543,6 +733,24 @@ void setSettings(bool doAsk) {
   if (doAsk == 1) {
     i = getNumericValue();
     if (receivedString[0] != 0) storage.dayGas = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Max. daily water ("));
+  Serial.print(storage.dayWater);
+  Serial.print(F(" L):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.dayWater = i;
+  }
+  Serial.println();
+
+  Serial.print(F("Use Yesterday's usage as daily max (0 - 1) ("));
+  Serial.print(storage.useYesterdayAsMax);
+  Serial.print(F("):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.useYesterdayAsMax = i;
   }
   Serial.println();
 
