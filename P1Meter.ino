@@ -56,8 +56,8 @@ struct StoreStruct {
   char energyIP[16];
   char waterIP[16];  
   byte beeperCnt;
-  uint32_t maxPower;
-  uint32_t dayPower;
+  int32_t maxPower;
+  int32_t dayPower;
   uint32_t dayGas;
   uint32_t dayWater;
   bool useYesterdayAsMax;
@@ -148,6 +148,7 @@ void setup() {
   }
   tft.fillScreen(TFT_BLACK);
   screen.setColorDepth(8);
+  printSettings();
 }
 
 void loop() {
@@ -225,9 +226,9 @@ void loop() {
       storage.lastWater = usedWater;
       storage.prefDay = tDay; 
       if (storage.useYesterdayAsMax && storage.prefDay!=-1){
-        storage.dayPower = storage.lastPower;
-        storage.dayGas = storage.lastGas;
-        storage.dayWater = storage.lastWater;
+        storage.dayPower = (int32_t)totalPower;
+        storage.dayGas = (uint32_t)totalGas;
+        storage.dayWater = (uint32_t)totalWater;
       }
       saveConfig();
     }
@@ -397,8 +398,8 @@ void loop() {
 
     fillSegment(170, 252, 0, 360, 50, TFT_BLACK);
 
-    Serial.printf("Used GAS today:%f\r\n", totalGas);
-    fillSegment(170, 252, 0, (totalGas)*(360/storage.dayGas), 48, TFT_SKYBLUE);
+    Serial.printf("Used GAS today:%f - %d\r\n", totalGas,storage.dayGas);
+    fillSegment(170, 252, 0, ((totalGas*360)/storage.dayGas), 48, TFT_SKYBLUE);
     if (totalGas>storage.dayGas){
       float restGas = totalGas;
       while (restGas>storage.dayGas) restGas -= storage.dayGas; 
@@ -407,8 +408,9 @@ void loop() {
 
     fillSegment(170, 252, 0, 360, 42, TFT_BLACK);
 
-    Serial.printf("Used water today:%f\r\n", totalWater);
-    fillSegment(170, 252, 0, (totalWater)*(360/storage.dayWater), 40, TFT_GREENYELLOW);
+    Serial.printf("Used water today:%f - %d \r\n", totalWater,storage.dayWater);
+    fillSegment(170, 252, 0, ((totalWater* 360)/storage.dayWater), 40, TFT_GREENYELLOW);
+    Serial.println((totalWater* 360)/storage.dayWater);
     if (totalWater>storage.dayWater){
       float restWater = totalWater;
       while (restWater>storage.dayWater) restWater -= storage.dayWater; 
@@ -559,7 +561,25 @@ void printGraph(float graphArray[], int lenArray, int scale, uint32_t lColor, St
       lastY = y;
     }
   }
+}
 
+void printSettings(){
+  Serial.println("Storage:");
+  Serial.printf("ESP_SSID:%s\r\n", storage.ESP_SSID);
+  Serial.printf("ESP_PASS:%s\r\n", storage.ESP_PASS);
+  Serial.printf("energyIP:%s\r\n", storage.energyIP);
+  Serial.printf("waterIP:%s\r\n", storage.waterIP);  
+  Serial.printf("beeperCnt:%d\r\n", storage.beeperCnt);
+  Serial.printf("maxPower:%d\r\n", storage.maxPower);
+  Serial.printf("dayPower:%d\r\n", storage.dayPower);
+  Serial.printf("dayGas:%d\r\n", storage.dayGas);
+  Serial.printf("dayWater:%d\r\n", storage.dayWater);
+  Serial.printf("useYesterdayAsMax:%s\r\n", storage.useYesterdayAsMax?"Y":"N");
+  Serial.printf("dispScreen:%d\r\n", storage.dispScreen);
+  Serial.printf("prefDay:%d\r\n", storage.prefDay);
+  Serial.printf("lastPower:%f\r\n", storage.lastPower);
+  Serial.printf("lastGas:%f\r\n", storage.lastGas);  
+  Serial.printf("lastWater:%f\r\n", storage.lastWater); 
 }
 
 int fillSegment(int x, int y, int start_angle, int sub_angle, int r, unsigned int color)
