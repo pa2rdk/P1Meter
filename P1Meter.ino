@@ -448,9 +448,9 @@ void loop() {
   // moveExamples();
   // printGraph(examples, ExampleCounter, ExampleScale, TFT_BLUE, "Examples");
   if (showDayGraph){
-    printGraph(minutes, MinutesCounter, MinutesScale, TFT_BLUE, "Energy (M)");
+    printGraph(minutes, MinutesCounter, MinutesScale, TFT_WHITE, "Energy (M)");
   } else {
-    printGraph(hours, HoursCounter, HoursScale, TFT_BLUE, "Energy (H)");
+    printGraph(hours, HoursCounter, HoursScale, TFT_WHITE, "Energy (H)");
   }
   screen.pushSprite(0, 0);
   screen.deleteSprite();
@@ -489,7 +489,7 @@ void moveHours(float actualPower) {
 }
 
 void printGraph(float graphArray[], int lenArray, int scale, uint32_t lColor, String gHeader){
-  screen.fillRect(0,40,240,110,TFT_WHITE);
+  screen.fillRect(0,40,240,110,TFT_BLACK);
   screen.drawLine(25,50,25,130,lColor);
   screen.drawLine(25,130,215,130,lColor);
   screen.setTextSize(2);
