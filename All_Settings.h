@@ -1,14 +1,15 @@
 StoreStruct storage = {
-		'#',                  // chkDigit;
-		"MARODEKWiFi2",       // ESP_SSID[16];
-		"MAROWiFi19052004!",  // ESP_PASS[27];
+		'%',                  // chkDigit;
+		"YourSSID",           // ESP_SSID[16];
+		"YourWiFiPass",       // ESP_PASS[27];
     "192.168.5.134",      // energyIP;
     "192.168.5.103",      // waterIP;
 		2,                    // beeperCnt;
+    3680,                 // maxFasePower;
     10000,                // maxPower (W);
     25,                   // dayPower (KW);
-    3,                    // dayGas (m3);
-    100,                  // dayWater (l);
+    5,                    // dayGas (m3);
+    500,                  // dayWater (l);
     1,                    // useYesterdayAsMax;
 		0,                    // dispScreen;
     -1,                   // prefDay

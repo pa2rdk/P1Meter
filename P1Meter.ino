@@ -56,6 +56,7 @@ struct StoreStruct {
   char energyIP[16];
   char waterIP[16];  
   byte beeperCnt;
+  int32_t maxFasePower;
   int32_t maxPower;
   int32_t dayPower;
   uint32_t dayGas;
@@ -246,6 +247,7 @@ void loop() {
     int power1 = 0;
     int power2 = 0;
     int power3 = 0;    
+    int heightDevider = storage.maxFasePower/123;
     uint32_t color = 0;
     screen.setTextDatum(MC_DATUM);
     screen.setTextColor(TFT_YELLOW, TFT_BLACK);
@@ -271,13 +273,14 @@ void loop() {
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
     screen.fillRect(2, 318-height, 12, height, color);
-    height = power1/30;
+    
+    height = power1/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
-    if (power1>1800) color = TFT_RED;
+    if (power1>storage.maxFasePower/2) color = TFT_RED;
     if (power1>0){
       screen.fillRect(16, 318-height, 12, height, color);
-      if (power1>3680) screen.fillTriangle(17, 195, 22, 191, 27, 195, TFT_WHITE);
+      if (power1>storage.maxFasePower) screen.fillTriangle(17, 195, 22, 191, 27, 195, TFT_WHITE);
     } else {
       screen.fillRect(16, 192, 12, height*-1, TFT_GREEN);
     }
@@ -304,13 +307,13 @@ void loop() {
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
     screen.fillRect(37, 318-height, 12, height, color);
-    height = power2/30;
+    height = power2/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
-    if (power2>1800) color = TFT_RED;
+    if (power2>storage.maxFasePower/2) color = TFT_RED;
     if (power2>0) {
       screen.fillRect(51, 318-height, 12, height, color);
-      if (power2>3680) screen.fillTriangle(52, 195, 57, 191, 62, 195, TFT_WHITE);
+      if (power2>storage.maxFasePower) screen.fillTriangle(52, 195, 57, 191, 62, 195, TFT_WHITE);
     } else {
       screen.fillRect(51, 192, 12, height*-1, TFT_GREEN);
     } 
@@ -337,13 +340,13 @@ void loop() {
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
     screen.fillRect(72, 318-height, 12, height, color);
-    height = power3/30;
+    height = power3/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
-    if (power3>1800) color = TFT_RED;
+    if (power3>storage.maxFasePower/2) color = TFT_RED;
     if (power3>0){
       screen.fillRect(86, 318-height, 12, height, color);
-      if (power3>3680) screen.fillTriangle(87, 195, 92, 191, 97, 195, TFT_WHITE);
+      if (power3>storage.maxFasePower) screen.fillTriangle(87, 195, 92, 191, 97, 195, TFT_WHITE);
     } else {
       screen.fillRect(86, 192, 12, height*-1, TFT_GREEN);
     }
@@ -570,6 +573,7 @@ void printSettings(){
   Serial.printf("energyIP:%s\r\n", storage.energyIP);
   Serial.printf("waterIP:%s\r\n", storage.waterIP);  
   Serial.printf("beeperCnt:%d\r\n", storage.beeperCnt);
+  Serial.printf("maxPhasePower:%d\r\n", storage.maxFasePower);
   Serial.printf("maxPower:%d\r\n", storage.maxPower);
   Serial.printf("dayPower:%d\r\n", storage.dayPower);
   Serial.printf("dayGas:%d\r\n", storage.dayGas);
@@ -729,6 +733,15 @@ void setSettings(bool doAsk) {
   }
   Serial.println();
 
+  Serial.print(F("Max. current power per phase("));
+  Serial.print(storage.maxFasePower);
+  Serial.print(F(" W):"));
+  if (doAsk == 1) {
+    i = getNumericValue();
+    if (receivedString[0] != 0) storage.maxFasePower = i;
+  }
+  Serial.println();
+
   Serial.print(F("Max. current power ("));
   Serial.print(storage.maxPower);
   Serial.print(F(" W):"));
@@ -774,15 +787,15 @@ void setSettings(bool doAsk) {
   }
   Serial.println();
 
-  Serial.print(F("Screen 1 (0 - 5) ("));
-  Serial.print(storage.dispScreen);
-  Serial.print(F("):"));
-  if (doAsk == 1) {
-    i = getNumericValue();
-    if (receivedString[0] != 0) storage.dispScreen = i;
-  }
-  Serial.println();
-  Serial.println();
+  // Serial.print(F("Screen 1 (0 - 5) ("));
+  // Serial.print(storage.dispScreen);
+  // Serial.print(F("):"));
+  // if (doAsk == 1) {
+  //   i = getNumericValue();
+  //   if (receivedString[0] != 0) storage.dispScreen = i;
+  // }
+  // Serial.println();
+  // Serial.println();
 
   if (doAsk == 1) {
     saveConfig();
