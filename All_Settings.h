@@ -21,7 +21,7 @@ StoreStruct storage = {
 wlanSSID wifiNetworks[] {
     {"PI4RAZ","PI4RAZ_Zoetermeer"},
     {"Loretz_Gast", "Lor_Steg_98"},
-    {"MARODEKWiFi", "MAROWiFi19052004!"}
+    {"YourWiFi", "YourPass!"}
 };
 
 int screenRotation          = 0; // 0=0, 1=90, 2=180, 3=270
