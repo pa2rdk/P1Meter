@@ -74,7 +74,7 @@ typedef struct {  // WiFi Access
   const char *PASSWORD;
 } wlanSSID;
 
-// #include "RDK_Settings.h";
+// #include "RdK_Settings.h";
 #include "All_Settings.h";
 
 WiFiMulti wifiMulti;
