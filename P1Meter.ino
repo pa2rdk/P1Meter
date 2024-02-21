@@ -56,9 +56,9 @@ struct StoreStruct {
   char energyIP[16];
   char waterIP[16];  
   byte beeperCnt;
-  int32_t maxFasePower;
-  int32_t maxPower;
-  int32_t dayPower;
+  uint32_t maxFasePower;
+  uint32_t maxPower;
+  uint32_t dayPower;
   uint32_t dayGas;
   uint32_t dayWater;
   bool useYesterdayAsMax;
@@ -74,7 +74,7 @@ typedef struct {  // WiFi Access
   const char *PASSWORD;
 } wlanSSID;
 
-// #include "RdK_Settings.h";
+//#include "RdK_Settings.h";
 #include "All_Settings.h";
 
 WiFiMulti wifiMulti;
@@ -222,14 +222,14 @@ void loop() {
     float totalWater = round((usedWater - storage.lastWater)*1000);
 
     if (tDay != storage.prefDay){
-      storage.lastPower = usedPower;
-      storage.lastGas = usedGas;
-      storage.lastWater = usedWater;
+      if (usedPower>0) storage.lastPower = usedPower;
+      if (usedGas>0) storage.lastGas = usedGas;
+      if (usedWater>0) storage.lastWater = usedWater;
       storage.prefDay = tDay; 
       if (storage.useYesterdayAsMax && storage.prefDay!=-1){
-        storage.dayPower = (int32_t)totalPower;
-        storage.dayGas = (uint32_t)totalGas;
-        storage.dayWater = (uint32_t)totalWater;
+        if (totalPower>0) storage.dayPower = (int32_t)totalPower;
+        if (totalGas>0) storage.dayGas = (uint32_t)totalGas;
+        if (totalWater>0) storage.dayWater = (uint32_t)totalWater;
       }
       saveConfig();
     }

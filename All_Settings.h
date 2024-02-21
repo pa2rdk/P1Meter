@@ -1,9 +1,9 @@
 StoreStruct storage = {
-		'*',                  // chkDigit;
+		'%',                  // chkDigit;
 		"YourSSID",           // ESP_SSID[16];
 		"YourWiFiPass",       // ESP_PASS[27];
     "192.168.5.134",      // energyIP;
-    "192.168.5.103",      // waterIP;
+    "192.168.5.104",      // waterIP;
 		2,                    // beeperCnt;
     3680,                 // maxFasePower;
     10000,                // maxPower (W);
