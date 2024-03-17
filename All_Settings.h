@@ -1,5 +1,5 @@
 StoreStruct storage = {
-		'%',                  // chkDigit;
+		'!',                  // chkDigit;
 		"YourSSID",           // ESP_SSID[16];
 		"YourWiFiPass",       // ESP_PASS[27];
     "192.168.5.134",      // energyIP;

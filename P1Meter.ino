@@ -45,6 +45,7 @@ float usedPower = 0;
 float usedGas = 0;
 float usedWater = 0;
 bool showDayGraph = 0;
+bool getWater = true;
 
 char receivedString[128];
 char chkGS[3] = "GS";
@@ -74,8 +75,8 @@ typedef struct {  // WiFi Access
   const char *PASSWORD;
 } wlanSSID;
 
-//#include "RdK_Settings.h";
-#include "All_Settings.h";
+//#include "RdK_Settings.h"
+#include "All_Settings.h"
 
 WiFiMulti wifiMulti;
 TFT_eSPI tft = TFT_eSPI();  // Invoke custom library
@@ -165,12 +166,15 @@ void loop() {
   bool longDelay = false;
   screen.fillSprite(TFT_BLACK);
 
-  bool getWater = true;
   usedWater = 0;
   int httpCode;
   String getData;
   DynamicJsonDocument jsonDocument(2048);
-  for (int i = 0;i<8;i++) if (storage.waterIP[i]!=storage.energyIP[i]) getWater = false;
+  if (getWater){
+    for (int i = 0;i<8;i++) if (storage.waterIP[i]!=storage.energyIP[i]) getWater = false;
+    if (storage.waterIP[0]=='0') getWater = false;
+  }
+
   if (getWater){
     getData = "http://" + String(storage.waterIP) + "/api/v1/data";
     Serial.println(getData);
@@ -222,12 +226,12 @@ void loop() {
     float totalWater = round((usedWater - storage.lastWater)*1000);
 
     if (tDay != storage.prefDay){
-      if (usedPower>0) storage.lastPower = usedPower;
+      if (usedPower!=0) storage.lastPower = usedPower;
       if (usedGas>0) storage.lastGas = usedGas;
       if (usedWater>0) storage.lastWater = usedWater;
       storage.prefDay = tDay; 
       if (storage.useYesterdayAsMax && storage.prefDay!=-1){
-        if (totalPower>0) storage.dayPower = (int32_t)totalPower;
+        if (totalPower!=0) storage.dayPower = (int32_t)totalPower;
         if (totalGas>0) storage.dayGas = (uint32_t)totalGas;
         if (totalWater>0) storage.dayWater = (uint32_t)totalWater;
       }
@@ -411,14 +415,17 @@ void loop() {
 
     fillSegment(170, 252, 0, 360, 42, TFT_BLACK);
 
-    Serial.printf("Used water today:%f - %d \r\n", totalWater,storage.dayWater);
-    fillSegment(170, 252, 0, ((totalWater* 360)/storage.dayWater), 40, TFT_GREENYELLOW);
-    Serial.println((totalWater* 360)/storage.dayWater);
-    if (totalWater>storage.dayWater){
-      float restWater = totalWater;
-      while (restWater>storage.dayWater) restWater -= storage.dayWater; 
-      fillSegment(170, 252, 0, (restWater)*(360/storage.dayWater), 38, TFT_RED);
+    if (getWater){
+      Serial.printf("Used water today:%f - %d \r\n", totalWater,storage.dayWater);
+      fillSegment(170, 252, 0, ((totalWater* 360)/storage.dayWater), 40, TFT_GREENYELLOW);
+      Serial.println((totalWater* 360)/storage.dayWater);
+      if (totalWater>storage.dayWater){
+        float restWater = totalWater;
+        while (restWater>storage.dayWater) restWater -= storage.dayWater; 
+        fillSegment(170, 252, 0, (restWater)*(360/storage.dayWater), 38, TFT_RED);
+      }
     }
+
 
     fillSegment(170, 252, 0, 360, 34, TFT_BLACK);
 
@@ -438,9 +445,11 @@ void loop() {
     screen.setTextColor(TFT_SKYBLUE, TFT_BLACK);
     screen.drawString(String(totalGas) + "M3", 170, 259, 2);
 
-    screen.setTextPadding(screen.textWidth(String(totalWater,0) + "L"));
-    screen.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
-    screen.drawString(String(totalWater) + "L", 170, 273, 2);
+    if (getWater){
+      screen.setTextPadding(screen.textWidth(String(totalWater,0) + "L"));
+      screen.setTextColor(TFT_GREENYELLOW, TFT_BLACK);
+      screen.drawString(String(totalWater) + "L", 170, 273, 2);
+    }
   } else {
     screen.fillSprite(TFT_BLACK);
     screen.setCursor(0, 0);
