@@ -246,6 +246,10 @@ void loop() {
       moveHours(jsonDocument["active_power_w"].as<float>());
     }
 
+    if (storage.dayPower==0) storage.dayPower=25;
+    if (storage.dayGas==0) storage.dayGas=5;
+    if (storage.dayWater==0) storage.dayWater=500;
+
     int voltage = 0;
     int height = 0;
     int power1 = 0;
@@ -360,9 +364,10 @@ void loop() {
     screen.setCursor(89, 310);
     screen.println("W"); 
 
-    int part1 = (abs(power1)*360)/storage.maxPower;
-    int part2 = (abs(power2)*360)/storage.maxPower;
-    int part3 = (abs(power3)*360)/storage.maxPower; 
+
+    int part1 = (abs(power1)*360)/(storage.maxPower>0?storage.maxPower:(power1+power2+power3!=0?power1+power2+power3:1));
+    int part2 = (abs(power2)*360)/(storage.maxPower>0?storage.maxPower:(power1+power2+power3!=0?power1+power2+power3:1));
+    int part3 = (abs(power3)*360)/(storage.maxPower>0?storage.maxPower:(power1+power2+power3!=0?power1+power2+power3:1)); 
     int nPart1 = 0;
     int nPart2 = 0;
     int nPart3 = 0;        
@@ -410,9 +415,8 @@ void loop() {
     if (totalGas>storage.dayGas){
       float restGas = totalGas;
       while (restGas>storage.dayGas) restGas -= storage.dayGas; 
-      fillSegment(170, 252, 0, (restGas)*(360/storage.dayGas), 46, TFT_RED);
+      fillSegment(170, 252, 0, (restGas)*(360/storage.dayGas), 46, TFT_RED); 
     }
-
     fillSegment(170, 252, 0, 360, 42, TFT_BLACK);
 
     if (getWater){
