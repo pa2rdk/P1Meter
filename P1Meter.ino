@@ -266,12 +266,13 @@ void loop() {
 
     voltage = round(jsonDocument["active_voltage_l1_v"].as<float>());
     power1 = voltage * jsonDocument["active_current_l1_a"].as<float>();
+    if (voltage==0) power1 = jsonDocument["active_power_l1_w"].as<float>();
     screen.setTextColor(TFT_YELLOW);
     screen.setCursor(0, 160);
     screen.println("L1");
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(0, 170);
-    screen.printf("%dV", voltage);
+    if (voltage>0) screen.printf("%dV", voltage);
     screen.setCursor(0, 180);
     screen.printf("%dW", power1);
     screen.drawRect(0, 190, 30, 130, TFT_YELLOW);
@@ -280,32 +281,33 @@ void loop() {
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(2, 318-height, 12, height, color);
+    if (voltage>0) screen.fillRect(2, 318-height, 12, height, color);
     
     height = power1/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power1>storage.maxFasePower/2) color = TFT_RED;
     if (power1>0){
-      screen.fillRect(16, 318-height, 12, height, color);
+      screen.fillRect(voltage>0?16:2, 318-height, voltage>0?12:26, height, color);
       if (power1>storage.maxFasePower) screen.fillTriangle(17, 195, 22, 191, 27, 195, TFT_WHITE);
     } else {
-      screen.fillRect(16, 192, 12, height*-1, TFT_GREEN);
+      screen.fillRect(voltage>0?16:2, 192, voltage>0?12:26, height*-1, TFT_GREEN);
     }
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(5, 310);
-    screen.println("V");
-    screen.setCursor(19, 310);
+    if (voltage>0) screen.println("V");
+    screen.setCursor(voltage>0?19:12, 310);
     screen.println("W");    
 
     voltage = round(jsonDocument["active_voltage_l2_v"].as<float>());
     power2 = voltage * jsonDocument["active_current_l2_a"].as<float>();
+    if (voltage==0) power2 = jsonDocument["active_power_l2_w"].as<float>();
     screen.setTextColor(TFT_GREEN);
     screen.setCursor(35, 160);
     screen.println("L2");
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(35, 170);
-    screen.printf("%dV", voltage);
+    if (voltage>0) screen.printf("%dV", voltage);
     screen.setCursor(35, 180);
     screen.printf("%dW", power2);
     screen.drawRect(35, 190, 30, 130, TFT_GREEN);
@@ -314,31 +316,32 @@ void loop() {
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(37, 318-height, 12, height, color);
+    if (voltage>0) screen.fillRect(37, 318-height, 12, height, color);
     height = power2/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power2>storage.maxFasePower/2) color = TFT_RED;
     if (power2>0) {
-      screen.fillRect(51, 318-height, 12, height, color);
+      screen.fillRect(voltage>0?51:37, 318-height, voltage>0?12:26, height, color);
       if (power2>storage.maxFasePower) screen.fillTriangle(52, 195, 57, 191, 62, 195, TFT_WHITE);
     } else {
-      screen.fillRect(51, 192, 12, height*-1, TFT_GREEN);
+      screen.fillRect(voltage>0?51:37, 192, voltage>0?12:26, height*-1, TFT_GREEN);
     } 
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(40, 310);
-    screen.println("V");
-    screen.setCursor(54, 310);
+    if (voltage>0) screen.println("V");
+    screen.setCursor(voltage>0?54:47, 310);
     screen.println("W"); 
 
     voltage = round(jsonDocument["active_voltage_l3_v"].as<float>());
     power3 = voltage * jsonDocument["active_current_l3_a"].as<float>();
+    if (voltage==0) power3 = jsonDocument["active_power_l3_w"].as<float>();
     screen.setTextColor(TFT_BLUE);
     screen.setCursor(70, 160);
     screen.println("L3");
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(70, 170);
-    screen.printf("%dV", voltage);
+    if (voltage>0) screen.printf("%dV", voltage);
     screen.setCursor(70, 180);
     screen.printf("%dW", power3);
     screen.drawRect(70, 190, 30, 130, TFT_BLUE);
@@ -347,21 +350,21 @@ void loop() {
     color = TFT_GREEN;
     if (voltage>235) color = TFT_YELLOW;
     if (voltage>250) color = TFT_RED;
-    screen.fillRect(72, 318-height, 12, height, color);
+    if (voltage>0) screen.fillRect(72, 318-height, 12, height, color);
     height = power3/heightDevider;
     if (height>123) height = 123;
     color = TFT_BLUE;
     if (power3>storage.maxFasePower/2) color = TFT_RED;
     if (power3>0){
-      screen.fillRect(86, 318-height, 12, height, color);
+      screen.fillRect(voltage>0?86:72, 318-height, voltage>0?12:26, height, color);
       if (power3>storage.maxFasePower) screen.fillTriangle(87, 195, 92, 191, 97, 195, TFT_WHITE);
     } else {
-      screen.fillRect(86, 192, 12, height*-1, TFT_GREEN);
+      screen.fillRect(voltage>0?86:72, 192, voltage>0?12:26, height*-1, TFT_GREEN);
     }
     screen.setTextColor(TFT_WHITE);
     screen.setCursor(75, 310);
-    screen.println("V");
-    screen.setCursor(89, 310);
+    if (voltage>0) screen.println("V");
+    screen.setCursor(voltage>0?89:82, 310);
     screen.println("W"); 
 
 
